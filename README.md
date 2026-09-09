@@ -15,6 +15,17 @@
 
 无需修改 dsh 源码、无需提 PR：`dsh plugin` 命令组装 + bundle patch 装配的 cordis 客户端 + 插件宿主半。
 
+> **▼ DSH 版本适配**
+> | DSH 版本 | 设置行 / 主机路由 | 关键差异 |
+> | --- | --- | --- |
+> | 0.1.1-rc.2 | ✅ | store 引擎在 `@deepseek-ai/dsh-client-runtime/client` |
+> | 0.1.2-rc.1 | ✅ | 引擎改名 `@deepseek-ai/dsh-client-store`；本插件两个都不导入 |
+>
+> - **单一产物，运行时自适应**：同一份 `lib/client.js` 在两版都能加载，无版本号字符串分支。客户端 bundle 只 `require` `react` / `react-dom`，两者都在两版共享模块表内。
+> - **store 座位本地实现**：设置行需要一个 store 座位（`StoreHandle` / `StoreInstance`，契约由 `@deepseek-ai/dsh-client-ui-slots` 拥有、两版一致）。原先用 runtime 的 `defineStore`，而该引擎包在两版之间改过名，因此改为约 30 行本地实现——只依赖 `create()` → `{ actions, getSnapshot, subscribe, clearPersisted }`，不再涉及任何版本专属 specifier。
+> - **其余契约两版一致**：`settings.general.item` 槽、`SettingsScope.{getSnapshot,subscribe,set,unset}`、`sessionQuery` 三个查询面在两版签名相同。
+> - 侧边栏入口目前仍处于关闭状态（`sidebar.footer.action` 注册已注释），两版都支持重新启用。
+
 ## 它能做什么
 
 - **标题 ↔ 内容双模式**：一个入口两种搜法——切到"标题"按会话标题/工作目录子串即时过滤；切到"内容"走 DSH 自带 FTS5 全文索引搜会话消息正文。

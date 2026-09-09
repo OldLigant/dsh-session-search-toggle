@@ -15,6 +15,17 @@
 
 A cordis client + host plugin assembled via the `dsh plugin` command and a bundle patch — no dsh source changes, no PR required.
 
+> **▼ DSH version support**
+> | DSH version | Settings row / host route | Key difference |
+> | --- | --- | --- |
+> | 0.1.1-rc.2 | ✅ | the store engine lives in `@deepseek-ai/dsh-client-runtime/client` |
+> | 0.1.2-rc.1 | ✅ | the engine was renamed to `@deepseek-ai/dsh-client-store`; this plugin imports neither |
+>
+> - **One artifact, runtime-adaptive**: the same `lib/client.js` loads on both releases with no version-string branching. The client bundle only `require`s `react` / `react-dom`, both of which sit in the shared module table of either release.
+> - **The store seat is implemented locally**: the settings row needs a store seat (`StoreHandle` / `StoreInstance`, a contract owned by `@deepseek-ai/dsh-client-ui-slots` and identical in both releases). It used to come from the runtime's `defineStore`, but that engine package was renamed between releases, so it is now a ~30-line local implementation that only provides `create()` → `{ actions, getSnapshot, subscribe, clearPersisted }` — no release-specific specifier.
+> - **Every other contract is identical across releases**: the `settings.general.item` slot, `SettingsScope.{getSnapshot,subscribe,set,unset}`, and the three `sessionQuery` faces have the same signatures in both.
+> - The sidebar entry is still disabled (`sidebar.footer.action` registration is commented out); both releases support re-enabling it.
+
 ## What it does
 
 - **Title ↔ content toggle**: two ways to search from one entry — "Title" filters by session title / working-directory substring live; "Content" searches message bodies through DSH's built-in FTS5 full-text index.

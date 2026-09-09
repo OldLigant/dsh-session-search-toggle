@@ -14,10 +14,7 @@
 import { createElement, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import type { Context } from 'cordis'
-import {
-  defineStore,
-  type SettingsScopeSnapshot,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { StoreHandle, StoreInstance } from '@deepseek-ai/dsh-client-ui-slots'
 import { DEFAULT_CONFIG, SWITCH_SEARCH_SETTINGS_NAMESPACE, type SwitchSearchConfig } from '../config.ts'
 
 /** ------------------------------------------------------------------ types */
@@ -39,6 +36,25 @@ interface SwitchSlotsService {
 /** The client sessions service face: open a session from a search result. */
 interface SwitchSessionsService {
   open(id: string): void
+}
+
+/**
+ * Two-release mirror of the Host settings snapshot.
+ *
+ * Anchors — 0.1.1-rc.2 exports `SettingsScopeSnapshot<T>` from
+ * `@deepseek-ai/dsh-client-runtime/client`; 0.1.2-rc.1 moved the export to
+ * `@deepseek-ai/dsh-client-store`. Both declare the same seven fields, so the
+ * shape is mirrored structurally here instead of imported: a value or type
+ * import of either package pins this client half to one release.
+ */
+interface SettingsScopeSnapshot<T> {
+  status: 'loading' | 'ready' | 'unavailable'
+  value: T | undefined
+  base: unknown
+  user: unknown
+  revision: number | undefined
+  writable: boolean
+  mode: 'host' | 'memory'
 }
 
 /** The client settings-scope service face (structural subset). */
@@ -103,37 +119,82 @@ export interface SwitchSearchSettingsInjected {
   setDefaultMode: (value: SwitchSearchConfig['defaultMode']) => void
 }
 
-/** The settings store: mirror of the namespace section plus the write set. */
-export const switchSearchStore = defineStore({
-  init: (): SwitchSearchSettingsState => ({
+/**
+ * The settings store — a local implementation of the slot store seat.
+ *
+ * The seat contract (`StoreHandle`/`StoreInstance`) is owned by
+ * `@deepseek-ai/dsh-client-ui-slots`, a module both releases share, and only
+ * asks for `create()` → `{ actions, getSnapshot, subscribe, clearPersisted }`.
+ * The runtime's `defineStore` engine, by contrast, lives in a package that was
+ * renamed across releases (`@deepseek-ai/dsh-client-runtime/client` in
+ * 0.1.1-rc.2 → `@deepseek-ai/dsh-client-store` in 0.1.2-rc.1), so importing it
+ * would pin this client half to one release. This mirror is a plain mutable
+ * snapshot, so the engine buys nothing here.
+ */
+
+/** The store's write set in declaration form (immer-draft mutators). */
+export type SwitchSearchActionsDecl = {
+  sync: (draft: SwitchSearchSettingsState, snap: SettingsScopeSnapshot<SwitchSearchConfig>) => void
+}
+
+/** The live instance the renderer binds `useStore` to. */
+export type SwitchSearchStoreInstance = StoreInstance<SwitchSearchSettingsState, SwitchSearchActionsDecl>
+
+/** The registration handle (shared identity across the plugin's registrations). */
+export type SwitchSearchStore = StoreHandle<SwitchSearchSettingsState, SwitchSearchActionsDecl>
+
+/** Baked store actions handed to the inject factory (the `sync` write set;
+ *  the draft parameter is bound by the framework, so consumers pass only snap). */
+export type SwitchSearchActions = SwitchSearchStoreInstance['actions']
+
+/** Fresh state for one instance. */
+function initSwitchSearchState(): SwitchSearchSettingsState {
+  return {
     enabled: DEFAULT_CONFIG.enabled,
     defaultMode: DEFAULT_CONFIG.defaultMode,
     revision: -1,
     writable: false,
     unavailable: false,
-  }),
-  actions: {
-    sync(d: SwitchSearchSettingsState, snap: SettingsScopeSnapshot<SwitchSearchConfig>): void {
-      if (snap.revision !== undefined && snap.revision <= d.revision) return
-      const value = snap.value as Partial<SwitchSearchConfig> | undefined
-      if (value?.enabled !== undefined) d.enabled = value.enabled
-      if (value?.defaultMode !== undefined) d.defaultMode = value.defaultMode
-      if (snap.revision !== undefined) d.revision = snap.revision
-      d.writable = snap.writable
-      d.unavailable = snap.status === 'unavailable'
-    },
-  },
-})
-
-/** Baked store actions handed to the inject factory (the `sync` write set;
- *  the draft parameter is bound by the framework, so consumers pass only snap). */
-export type SwitchSearchActions = {
-  sync: (snap: SettingsScopeSnapshot<SwitchSearchConfig>) => void
+  }
 }
 
-/** The store handle type, for props derivation. */
-export type SwitchSearchStore = {
-  create: () => SwitchSearchSettingsState
+/** Apply one Host snapshot onto a draft, fenced by namespace revision. */
+function applySnapshot(draft: SwitchSearchSettingsState, snap: SettingsScopeSnapshot<SwitchSearchConfig>): void {
+  if (snap.revision !== undefined && snap.revision <= draft.revision) return
+  const value = snap.value as Partial<SwitchSearchConfig> | undefined
+  if (value?.enabled !== undefined) draft.enabled = value.enabled
+  if (value?.defaultMode !== undefined) draft.defaultMode = value.defaultMode
+  if (snap.revision !== undefined) draft.revision = snap.revision
+  draft.writable = snap.writable
+  draft.unavailable = snap.status === 'unavailable'
+}
+
+/** The settings store handle registered on the General settings row. */
+export const switchSearchStore: SwitchSearchStore = {
+  spec: { init: initSwitchSearchState, actions: { sync: applySnapshot } },
+  create: (): SwitchSearchStoreInstance => {
+    let state = initSwitchSearchState()
+    const listeners = new Set<() => void>()
+    const sync: SwitchSearchActions['sync'] = (snap): void => {
+      const next: SwitchSearchSettingsState = { ...state }
+      applySnapshot(next, snap)
+      // A stale snapshot leaves the draft untouched; skip the notification too.
+      if (next.revision === state.revision && next.enabled === state.enabled
+        && next.defaultMode === state.defaultMode && next.writable === state.writable
+        && next.unavailable === state.unavailable) return
+      state = next
+      for (const listener of [...listeners]) listener()
+    }
+    return {
+      actions: { sync },
+      getSnapshot: () => state,
+      subscribe: (fn: () => void): (() => void) => {
+        listeners.add(fn)
+        return () => { listeners.delete(fn) }
+      },
+      clearPersisted: () => {},
+    }
+  },
 }
 
 declare module 'cordis' {

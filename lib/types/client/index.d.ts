@@ -1,5 +1,5 @@
 import type { Context } from 'cordis';
-import { type SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client';
+import type { StoreHandle, StoreInstance } from '@deepseek-ai/dsh-client-ui-slots';
 import { type SwitchSearchConfig } from '../config.ts';
 /** ------------------------------------------------------------------ types */
 /** The client slots service face (structural subset used here). */
@@ -18,6 +18,24 @@ interface SwitchSlotsService {
 /** The client sessions service face: open a session from a search result. */
 interface SwitchSessionsService {
     open(id: string): void;
+}
+/**
+ * Two-release mirror of the Host settings snapshot.
+ *
+ * Anchors — 0.1.1-rc.2 exports `SettingsScopeSnapshot<T>` from
+ * `@deepseek-ai/dsh-client-runtime/client`; 0.1.2-rc.1 moved the export to
+ * `@deepseek-ai/dsh-client-store`. Both declare the same seven fields, so the
+ * shape is mirrored structurally here instead of imported: a value or type
+ * import of either package pins this client half to one release.
+ */
+interface SettingsScopeSnapshot<T> {
+    status: 'loading' | 'ready' | 'unavailable';
+    value: T | undefined;
+    base: unknown;
+    user: unknown;
+    revision: number | undefined;
+    writable: boolean;
+    mode: 'host' | 'memory';
 }
 /** The client settings-scope service face (structural subset). */
 interface SwitchSettingsScope<T> {
@@ -46,19 +64,31 @@ export interface SwitchSearchSettingsInjected {
     setEnabled: (value: boolean) => void;
     setDefaultMode: (value: SwitchSearchConfig['defaultMode']) => void;
 }
-/** The settings store: mirror of the namespace section plus the write set. */
-export declare const switchSearchStore: import("@deepseek-ai/dsh-client-runtime/client").EngineStoreHandle<SwitchSearchSettingsState, {
-    sync(d: SwitchSearchSettingsState, snap: SettingsScopeSnapshot<SwitchSearchConfig>): void;
-}>;
+/**
+ * The settings store — a local implementation of the slot store seat.
+ *
+ * The seat contract (`StoreHandle`/`StoreInstance`) is owned by
+ * `@deepseek-ai/dsh-client-ui-slots`, a module both releases share, and only
+ * asks for `create()` → `{ actions, getSnapshot, subscribe, clearPersisted }`.
+ * The runtime's `defineStore` engine, by contrast, lives in a package that was
+ * renamed across releases (`@deepseek-ai/dsh-client-runtime/client` in
+ * 0.1.1-rc.2 → `@deepseek-ai/dsh-client-store` in 0.1.2-rc.1), so importing it
+ * would pin this client half to one release. This mirror is a plain mutable
+ * snapshot, so the engine buys nothing here.
+ */
+/** The store's write set in declaration form (immer-draft mutators). */
+export type SwitchSearchActionsDecl = {
+    sync: (draft: SwitchSearchSettingsState, snap: SettingsScopeSnapshot<SwitchSearchConfig>) => void;
+};
+/** The live instance the renderer binds `useStore` to. */
+export type SwitchSearchStoreInstance = StoreInstance<SwitchSearchSettingsState, SwitchSearchActionsDecl>;
+/** The registration handle (shared identity across the plugin's registrations). */
+export type SwitchSearchStore = StoreHandle<SwitchSearchSettingsState, SwitchSearchActionsDecl>;
 /** Baked store actions handed to the inject factory (the `sync` write set;
  *  the draft parameter is bound by the framework, so consumers pass only snap). */
-export type SwitchSearchActions = {
-    sync: (snap: SettingsScopeSnapshot<SwitchSearchConfig>) => void;
-};
-/** The store handle type, for props derivation. */
-export type SwitchSearchStore = {
-    create: () => SwitchSearchSettingsState;
-};
+export type SwitchSearchActions = SwitchSearchStoreInstance['actions'];
+/** The settings store handle registered on the General settings row. */
+export declare const switchSearchStore: SwitchSearchStore;
 declare module 'cordis' {
     interface Context {
         slots: SwitchSlotsService;
